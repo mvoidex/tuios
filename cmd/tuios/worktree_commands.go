@@ -28,6 +28,7 @@ import (
 
 // worktreeRow is one entry of list-worktrees as the CLI reads it.
 type worktreeRow struct {
+	VCS          string   `json:"vcs,omitempty"`
 	Session      string   `json:"session"`
 	Repo         string   `json:"repo"`
 	RepoRoot     string   `json:"repo_root"`
@@ -651,6 +652,7 @@ func runWorktreeRemove(target string, stash, force, keepSession, jsonOutput bool
 
 // removedWorktree is the result of remove-worktree as the CLI reads it.
 type removedWorktree struct {
+	VCS           string `json:"vcs,omitempty"`
 	Session       string `json:"session"`
 	Branch        string `json:"branch"`
 	Path          string `json:"path"`
@@ -674,7 +676,11 @@ func (r removedWorktree) sentences() string {
 	}
 	switch {
 	case r.Stashed:
-		fmt.Fprintf(&b, "%d uncommitted %s %s in git stash as '%s'.\n", r.Changes, plural.Word(r.Changes, "change", "changes"), plural.Word(r.Changes, "is", "are"), r.StashMessage)
+		vcs := "git"
+		if r.VCS == "arc" {
+			vcs = "Arc"
+		}
+		fmt.Fprintf(&b, "%d uncommitted %s %s in %s stash as '%s'.\n", r.Changes, plural.Word(r.Changes, "change", "changes"), plural.Word(r.Changes, "is", "are"), vcs, r.StashMessage)
 	case r.Discarded:
 		fmt.Fprintf(&b, "%d uncommitted %s %s discarded.\n", r.Changes, plural.Word(r.Changes, "change", "changes"), plural.Word(r.Changes, "was", "were"))
 	}
@@ -682,6 +688,9 @@ func (r removedWorktree) sentences() string {
 		// The part nothing saves: git never stashes ignored files, and the
 		// removal deleted them without --force.
 		fmt.Fprintf(&b, "%d ignored %s deleted, and git never stashes ignored files.\n", r.Ignored, plural.Word(r.Ignored, "file was", "files were"))
+	}
+	if !r.Gone && r.Note != "" {
+		fmt.Fprintln(&b, r.Note)
 	}
 	if r.SessionKilled {
 		fmt.Fprintf(&b, "Killed session '%s'.", r.Session)
@@ -721,6 +730,9 @@ func runWorktreeDiff(name string, stat bool) error {
 			What:  fmt.Sprintf("the worktree of %q is gone.", name),
 			Cause: row.Path + " no longer exists.",
 		}
+	}
+	if row.VCS == "arc" {
+		return runReview(os.Stdout, name, "", reviewOptions{stat: stat, context: 3}, false)
 	}
 	if row.Base != "" {
 		log, err := worktree.Log(row.Path, row.Base)

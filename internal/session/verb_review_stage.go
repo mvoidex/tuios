@@ -139,6 +139,9 @@ func (d *Daemon) verbReviewStage(cs *connState, params json.RawMessage) (any, *v
 	if verr != nil {
 		return nil, verr
 	}
+	if repo.vcs == "arc" {
+		return nil, invalidParam("action", "Arc review supports notes; stage and unstage changes with the Arc CLI")
+	}
 	if _, verr := d.reviewAuthorOf(cs, p.HumanNonce, sess.ID, "review-stage"); verr != nil {
 		return nil, verr
 	}

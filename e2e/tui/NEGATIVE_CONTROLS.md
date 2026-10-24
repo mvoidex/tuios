@@ -7,6 +7,44 @@ below. Two of them are **not** caught here; that is written down rather than
 papered over, because a suite whose real coverage is unknown is worse than no
 suite.
 
+## Arc review notes and managed mounts
+
+`TestArcReviewAndManagedMount` uses the real Arc CLI, service, FUSE mounts,
+TUIOS daemon and a fake interactive agent. Opt in with
+`TUIOS_E2E_ARC_SOURCE=/path/to/mounted/repository`; the source is read only.
+All edits and commits stay in mounts created by the test, and nothing is pushed.
+The fixture verifies committed, uncommitted and untracked changes, unchanged
+staging, note reanchoring and delivery, dirty-removal refusal, and recovery of
+a local branch and stash after unmounting. It also creates a child mount from
+an unpushed local commit.
+
+On 2026-10-24, the baseline binary at `08148666` failed at creation with
+`is not inside a git repository`. The patched binary passed the workflow
+against `cloudia`. The test writes `arc-review.json`, `arc-notes.json` and
+`arc-delivered.txt` under `TUIOS_E2E_FRAMES` when set.
+
+The follow-up `TestArcManualMountRegistration` creates a mount through Arc
+outside TUIOS, starts a session in a subdirectory, switches branches and moves
+the shell out and back. It checks automatic unmanaged registration, opens the
+actual TUI menu and creates a child mount, checks that deleting the discovered
+mount is refused and its close dialog has no delete row, and kills both
+sessions while verifying that both mounts remain mounted. It saves
+`arc-registration.json` and TUI frames under `TUIOS_E2E_FRAMES`.
+
+On 2026-10-24, the prior Arc-enabled binary failed the registration test because
+the manual session never appeared in `worktree ls`. With a `sleep` process
+holding the child mount as cwd, the prior binary also failed
+`TestArcReviewAndManagedMount` with `Resource busy`, naming the holding process.
+The forced-unmount build passed that case and retained the branch and stash.
+The registration build also passed the full manual-mount test, including the
+real sidebar creation dialog and verifying that both mounts survive session
+termination.
+
+Repeat from `e2e/tui` with `TUIOS_E2E=1 TUIOS_E2E_BIN=/path/to/tuios
+TUIOS_E2E_ARC_SOURCE=/path/to/mount TUIOS_E2E_FRAMES=/path/to/artifacts
+go test -count=1 -run '^TestArc(ReviewAndManagedMount|ManualMountRegistration)$'
+-timeout 6m -v .`.
+
 ## Synchronized output holds the native cursor with content
 
 `TestSynchronizedOutputHoldsHostCursor` uses a real daemon, attached client,

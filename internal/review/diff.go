@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/arc"
 	"github.com/Gaurav-Gosain/tuios/internal/childproc"
 
 	"github.com/Gaurav-Gosain/tuios/internal/worktree"
@@ -68,7 +69,12 @@ func ValidRef(ref string) error {
 // merge base with the upstream branch, then HEAD. A named or recorded base
 // is taken through the merge base with HEAD, so a base that moved on since
 // the branch left it does not show its own changes as removed.
+// An Arc mount uses its recorded starting commit, or its repository's default
+// branch instead of a Git upstream.
 func ResolveBase(ctx context.Context, dir, requested, recorded string, uncommitted bool) (Base, error) {
+	if _, ok := arc.Locate(dir); ok {
+		return resolveArcBase(ctx, dir, requested, recorded, uncommitted)
+	}
 	head, headErr := revParse(ctx, dir, "HEAD^{commit}")
 	headBase := func(from string) (Base, error) {
 		if headErr != nil {
@@ -151,7 +157,11 @@ type Options struct {
 // Build reads the diff. Nothing in the repository, its index or its working
 // tree is changed: the working state is written as a tree through a
 // temporary index, whose objects git gc collects like any other loose object.
+// Arc reads the current diff without creating a snapshot or changing its index.
 func Build(ctx context.Context, opt Options) (*Diff, error) {
+	if _, ok := arc.Locate(opt.Dir); ok {
+		return buildArc(ctx, opt)
+	}
 	lim := opt.Limits
 	if lim.Files <= 0 {
 		lim = DefaultLimits
@@ -352,7 +362,13 @@ func BlobLines(ctx context.Context, dir, rev, path string) ([]string, error) {
 	if err := ValidPath(path); err != nil {
 		return nil, err
 	}
-	out, err := git(ctx, dir, nil, "cat-file", "blob", rev+":"+path)
+	var out string
+	var err error
+	if _, ok := arc.Locate(dir); ok {
+		out, err = arc.Run(ctx, dir, "show", rev+":"+path)
+	} else {
+		out, err = git(ctx, dir, nil, "cat-file", "blob", rev+":"+path)
+	}
 	if err != nil {
 		return nil, err
 	}

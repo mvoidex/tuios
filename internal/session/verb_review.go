@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/arc"
 	"github.com/Gaurav-Gosain/tuios/internal/config"
 	"github.com/Gaurav-Gosain/tuios/internal/diffview"
 	"github.com/Gaurav-Gosain/tuios/internal/gitstate"
@@ -61,7 +62,7 @@ import (
 
 // Error codes the review verbs raise, on top of the shared ones.
 const (
-	// ErrVerbNotRepo reports a pane or session with no git repository under
+	// ErrVerbNotRepo reports a pane or session with no Git or Arc repository under
 	// it, so there is nothing to review. Nothing was read.
 	ErrVerbNotRepo = "not_repo"
 	// ErrVerbNoNotes reports a send-review that found no unsent notes to
@@ -69,7 +70,7 @@ const (
 	ErrVerbNoNotes = "no_notes"
 )
 
-// reviewTimeout bounds every git call one review verb makes, together.
+// reviewTimeout bounds all VCS calls one review verb makes, together.
 const reviewTimeout = 10 * time.Second
 
 // reviewMaxPaths bounds the paths filter of review-diff.
@@ -77,6 +78,8 @@ const reviewMaxPaths = 256
 
 // reviewRepo is the repository under a pane.
 type reviewRepo struct {
+	// vcs is arc for an Arc mount, empty for Git.
+	vcs string
 	// root is the worktree's own root, symbolic links resolved: the key of
 	// its notes and where git runs.
 	root string
@@ -150,9 +153,13 @@ func (d *Daemon) paneRepo(sess *Session, target WindowState) (reviewRepo, *verbE
 				recorded = b
 			}
 		}
-		return reviewRepo{root: canonRoot(wt.Path), repoRoot: wt.RepoRoot, recorded: recorded, info: wt}, nil
+		return reviewRepo{vcs: wt.VCS, root: canonRoot(wt.Path), repoRoot: wt.RepoRoot, recorded: recorded, info: wt}, nil
 	}
 	if cwd != "" {
+		if root, ok := arc.Locate(cwd); ok {
+			root = canonRoot(root)
+			return reviewRepo{vcs: "arc", root: root, repoRoot: root}, nil
+		}
 		if _, common, root, ok := gitstate.Locate(cwd); ok {
 			repoRoot := common
 			if filepath.Base(common) == ".git" {
@@ -161,9 +168,9 @@ func (d *Daemon) paneRepo(sess *Session, target WindowState) (reviewRepo, *verbE
 			return reviewRepo{root: canonRoot(root), repoRoot: repoRoot}, nil
 		}
 	}
-	return reviewRepo{}, hintedVerbError(ErrVerbNotRepo, "no git repository is under window "+shortWindowID(target.ID), &VerbHint{
+	return reviewRepo{}, hintedVerbError(ErrVerbNotRepo, "no Git or Arc repository is under window "+shortWindowID(target.ID), &VerbHint{
 		Param:  "window",
-		Detail: "Nothing was read. Review a pane whose directory is inside a git repository, or a worktree session.",
+		Detail: "Nothing was read. Review a pane whose directory is inside a Git or Arc repository, or a worktree session.",
 	})
 }
 
@@ -224,6 +231,9 @@ func (d *Daemon) verbReviewDiff(cs *connState, params json.RawMessage) (any, *ve
 	sess, target, repo, verr := d.reviewTarget(p.Session, p.Window)
 	if verr != nil {
 		return nil, verr
+	}
+	if repo.vcs == "arc" && p.Index != "" {
+		return nil, invalidParam("index", "Arc review shows changes against a base; index views are not supported")
 	}
 
 	ctx, cancel := context.WithTimeout(d.ctx, reviewTimeout)
@@ -289,6 +299,9 @@ func (d *Daemon) verbReviewDiff(cs *connState, params json.RawMessage) (any, *ve
 		"notes":       notes,
 		"untrusted":   true,
 	}
+	if diff.VCS != "" {
+		out["vcs"] = diff.VCS
+	}
 	if p.Index != "" {
 		out["index"] = p.Index
 	}
@@ -307,7 +320,7 @@ func (d *Daemon) verbReviewDiff(cs *connState, params json.RawMessage) (any, *ve
 func reviewGitFailed(err error) *verbError {
 	detail := "Nothing in the repository was changed."
 	if errors.Is(err, context.DeadlineExceeded) {
-		detail = "git took longer than " + reviewTimeout.String() + ", so the diff was given up. Nothing in the repository was changed. Narrow it with paths."
+		detail = "The VCS command took longer than " + reviewTimeout.String() + ", so the diff was given up. Nothing in the repository was changed. Narrow it with paths."
 	}
 	return hintedVerbError(ErrVerbGitFailed, err.Error(), &VerbHint{Detail: detail})
 }

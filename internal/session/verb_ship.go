@@ -241,6 +241,9 @@ func (d *Daemon) shipTarget(cs *connState, sessionName, window string) (*Session
 	if verr != nil {
 		return nil, WindowState{}, reviewRepo{}, verr
 	}
+	if repo.vcs == "arc" {
+		return nil, WindowState{}, reviewRepo{}, invalidParam("session", "ship currently requires Git; commit and submit changes with the Arc CLI")
+	}
 	return sess, target, repo, nil
 }
 

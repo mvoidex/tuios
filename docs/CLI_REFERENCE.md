@@ -761,6 +761,21 @@ A git worktree as a session. `worktree new` makes a worktree of the repository
 you are in and a session whose directory is that worktree. The rail groups these
 sessions under the repository and labels each by its branch.
 
+Inside an Arc repository, `worktree new` creates an Arc mount instead. TUIOS
+detects `.arc` up the directory tree, reads the repository name from
+`arc info --json`, and runs `arc mount -r <repository> -m <path>`. It then
+checks out the requested branch, creating it from `--base` or the source
+mount's current commit. The source's object store is shared, so an unpushed
+local commit can be the starting point. Each mount has its own branch refs,
+index and working files. Arc must be installed and able to mount repositories.
+
+Sessions inside manually created Arc mounts are registered automatically in
+the rail and `worktree ls`. Registration follows the first pane's working
+directory and branch. Metadata is cached until Arc's HEAD or config changes;
+idle sessions start no detection processes. Detected mounts carry
+`"vcs": "arc", "managed": false` in JSON and enable the rail's
+"New worktree..." action directly. Review notes work in either kind of mount.
+
 The same verb is reachable from the rail. Right-click a repository's group
 header, or a worktree session's row, and take "New worktree...". The dialog
 asks for the branch and the session name. Leave the name empty and the dialog
@@ -795,6 +810,22 @@ Worktrees go under `$XDG_DATA_HOME/tuios/worktrees/<repo>/<branch>`.
 discards them, and is the only option that does. The branch is never deleted.
 A session whose worktree directory was removed under it shows `gone` in the
 listing and is kept.
+
+For TUIOS-created Arc mounts, `worktree rm` stops the session's pane processes,
+runs `arc unmount --force` so remaining MCP children cannot keep it busy, and
+removes the empty mount directory. `--stash` saves changes with `arc stash push
+--include-untracked`; `--force` permits unmounting a dirty mount. Arc's backing
+store is retained in both cases, including local branches, stashes and files.
+The result reports its location. Remount the same path with `arc mount -r
+<repository> -m <path>` to recover them. `--keep-session` retains the session
+record until its client closes it, but the panes still stop before unmounting.
+Killing a session alone leaves its mount mounted. Unmounting is a separate,
+explicit action: `worktree rm` or "Delete worktree too" in the close dialog.
+Manually created mounts remain unmanaged: neither action unmounts them, and
+their close dialog only offers closing the session. Unmount them with Arc.
+`worktree diff` shows the Arc review diff against the mount's starting commit.
+Merged-branch detection, fan-outs, shipping, checkpoints and worktree transfer
+remain Git-only.
 
 The MERGED column of `worktree ls` shows `into <ref>` when the branch is
 merged. A branch is merged when it has commits of its own, and merging it into
@@ -2395,6 +2426,15 @@ file larger than `[agents.checkpoints] max_untracked_mb` (50 by default) is
 listed as not read, with no counts. It is read by the daemon through a temporary git index, so the repository, its index and its
 files are not changed. See
 [Reviewing an agent's changes](AGENT_STATE.md#reviewing-an-agents-changes).
+
+Arc repositories use the same review display, line and hunk notes, note
+reanchoring, and `review send` workflow. A TUIOS-managed mount uses its starting
+commit as the base; another Arc mount uses the merge base with the default
+branch reported by `arc info --mount --json`. `--base` and `--uncommitted`
+override that choice. The diff includes committed, staged, unstaged and
+untracked changes without staging files. Arc currently reports renames as
+added and deleted paths. Arc review does not support index views, staging,
+checkpoint diffs or comparisons between mounts.
 
 **Usage:**
 ```bash

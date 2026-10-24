@@ -38,6 +38,9 @@ type worktreePromptState struct {
 	// the cached listing can be replaced by a reply already in flight, and the
 	// create must act on the repository the user was looking at.
 	RepoRoot string
+	// RepoName is the name from the worktree record; an Arc mount's folder
+	// need not have the same name as its repository.
+	RepoName string
 	// Branch is the typed branch.
 	Branch string
 	// Name is the typed session name, empty for the derived one. Tab moves
@@ -90,6 +93,7 @@ func (m *OS) BeginWorktreePromptForSession(name string) {
 		return
 	}
 	m.openWorktreePrompt(info.RepoRoot)
+	m.worktreePrompt.RepoName = info.Repo
 }
 
 // BeginWorktreePromptForRepo opens the dialog on a repository's group header.
@@ -103,6 +107,7 @@ func (m *OS) BeginWorktreePromptForRepo(repo string) {
 		return
 	}
 	m.openWorktreePrompt(root)
+	m.worktreePrompt.RepoName = repo
 }
 
 // openWorktreePrompt captures the repository and opens on an empty branch.
@@ -206,6 +211,9 @@ func (m *OS) WorktreePromptCancel() { m.worktreePrompt = worktreePromptState{} }
 func (m *OS) worktreePromptRepo() string {
 	if !m.WorktreePromptOpen() {
 		return ""
+	}
+	if m.worktreePrompt.RepoName != "" {
+		return m.worktreePrompt.RepoName
 	}
 	return filepath.Base(m.worktreePrompt.RepoRoot)
 }

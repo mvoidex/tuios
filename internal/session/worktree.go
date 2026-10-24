@@ -1,13 +1,17 @@
 package session
 
 import (
+	"context"
 	"os"
+	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/arc"
 	"github.com/Gaurav-Gosain/tuios/internal/ghpr"
 	"github.com/Gaurav-Gosain/tuios/internal/worktree"
 )
 
-// A worktree session is a session whose directory is a linked git worktree.
+// A worktree session is a session whose directory is a linked Git worktree
+// or an Arc mount, created by tuios or discovered from a pane's directory.
 // The daemon records which one, so the rail can group it under its repository
 // and label it by its branch, and so the worktree verbs can take it away
 // again without re-deriving where it came from.
@@ -15,7 +19,7 @@ import (
 // The record has two sources. The worktree verbs write it when they create
 // the worktree, and mark it managed: tuios made it, so tuios may remove it.
 // Every other session gets it by detection from its first window's directory,
-// which is read from files and never from git. A detected record follows the
+// which is read from Git's files or cached Arc metadata. A detected record follows the
 // directory: when the shell moves out of the worktree the record goes with it.
 // A managed record does not, because the session is the worktree.
 
@@ -261,7 +265,28 @@ func (s *Session) refreshWorktree(cwd string) {
 	if cwd == "" {
 		return
 	}
-	detected, ok := worktree.Detect(cwd)
+	var detected worktree.Info
+	var ok bool
+	if root, found := arc.Locate(cwd); found {
+		root = canonRoot(root)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		metadata, err := arc.ReadInfoCached(ctx, root)
+		cancel()
+		if err == nil {
+			branch := metadata.Branch
+			if branch == "" {
+				branch = "detached@" + metadata.Hash[:min(7, len(metadata.Hash))]
+			}
+			detected = worktree.Info{VCS: "arc", Repo: metadata.Repository, RepoRoot: root, Branch: branch, Path: root}
+			ok = true
+		} else if current != nil && current.VCS == "arc" && canonRoot(current.Path) == root {
+			// A busy or temporarily unavailable mount must not lose its
+			// registration. The metadata cache bounds retries on later saves.
+			return
+		}
+	} else {
+		detected, ok = worktree.Detect(cwd)
+	}
 	switch {
 	case !ok && current == nil:
 		return

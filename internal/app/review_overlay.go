@@ -566,8 +566,8 @@ func reviewErrorText(err error) string {
 		case session.ErrVerbUnknownVerb:
 			return "This daemon cannot review changes. " + restartHintPlain
 		case session.ErrVerbNotRepo:
-			if strings.Contains(callErr.Message, "no git repository") {
-				return "No git repository under this pane"
+			if strings.Contains(callErr.Message, "no git repository") || strings.Contains(callErr.Message, "no Git or Arc repository") {
+				return "No Git or Arc repository under this pane"
 			}
 			return "Nothing to review here: " + callErr.Message
 		case session.ErrVerbNoNotes:

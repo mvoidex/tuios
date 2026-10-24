@@ -4645,6 +4645,16 @@ tuios review send -s api-fan-retry-2      # typed when the agent comes to rest
 The verbs are `review-diff`, `review-note` and `send-review`
 ([protocol.md](protocol.md#review-diff)).
 
+The same display and notes work in Arc mounts. TUIOS finds `.arc` up the pane's
+directory tree and reads the diff with Arc, without changing staging. A mount
+made by `tuios worktree new` uses its starting commit as the base; another Arc
+mount uses the merge base with the repository's default branch. `--base` and
+`--uncommitted` override it. See the [Arc worktree lifecycle](CLI_REFERENCE.md#tuios-worktree)
+for creating and removing managed mounts. Manually created Arc mounts are
+automatically registered in the rail as unmanaged and can be used to create
+child mounts. Closing their session leaves the mount alone. Fan comparisons, staging from the review,
+turn checkpoints, shipping and worktree transfer remain Git-only.
+
 **What is diffed.** The pane's repository: the session's worktree when the
 pane is in it, else the repository holding the pane's directory. The diff
 runs from a base, in this order: the `base` you name; the base the worktree

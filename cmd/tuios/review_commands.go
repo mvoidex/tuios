@@ -31,8 +31,10 @@ its upstream branch, else only what is not committed. Committed and
 uncommitted work show together, untracked files included and ignored files
 left out. An untracked file larger than [agents.checkpoints] max_untracked_mb
 (50 by default) is listed but not read. The diff is read by the daemon, on the machine the pane runs on,
-through a temporary git index: the repository, its index and its files are
-not changed.
+through a temporary git index for Git, or read directly with arc diff for Arc:
+the repository's index and files are not changed. An Arc mount created by
+tuios is compared against its starting commit; another Arc mount uses the
+merge base with its repository's default branch.
 
 Name the session as an argument or with -s, and the pane with -w (default the
 focused pane). --against compares the attempt with another attempt of the same

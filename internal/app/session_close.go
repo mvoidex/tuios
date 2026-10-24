@@ -45,9 +45,10 @@ const (
 // apart. Window and workspace closes never carry the row: they are not
 // sessions, and the dialog's destructive extra would have nothing to point at.
 func (m *OS) sessionCloseRowCount() int {
-	if m.SessionCloseWindow == "" && m.SessionCloseWorkspace == 0 &&
-		m.sessionWorktreeInfo(m.sessionCloseTarget()) != nil {
-		return 3
+	if m.SessionCloseWindow == "" && m.SessionCloseWorkspace == 0 {
+		if info := m.sessionWorktreeInfo(m.sessionCloseTarget()); info != nil && (info.VCS != "arc" || info.Managed) {
+			return 3
+		}
 	}
 	return 2
 }
@@ -535,6 +536,10 @@ func (m *OS) handleWorktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 	var note string
 	switch {
 	case msg.Gone:
+		note = msg.Note
+	case msg.Note != "":
+		// Arc reports the retained store here; its stashes are not Git
+		// stashes, and this is the location needed to recover local work.
 		note = msg.Note
 	case msg.Stashed:
 		note = fmt.Sprintf("Deleted worktree %s. Branch %s kept. %d %s in git stash.",

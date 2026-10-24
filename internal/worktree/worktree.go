@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Gaurav-Gosain/tuios/internal/arc"
 	"github.com/Gaurav-Gosain/tuios/internal/childproc"
 
 	"github.com/Gaurav-Gosain/tuios/internal/gitstate"
@@ -32,9 +33,12 @@ import (
 
 // Info is what a worktree is, as far as the rest of tuios needs to know.
 type Info struct {
-	// Repo is the repository's name: the base name of its main checkout.
+	// VCS is arc for an Arc mount, empty for a Git worktree.
+	VCS string `json:"vcs,omitempty"`
+	// Repo is the repository's name: Git's main checkout name, or Arc's
+	// repository name as reported by arc info.
 	Repo string `json:"repo"`
-	// RepoRoot is the main checkout, the directory holding the shared .git.
+	// RepoRoot is Git's main checkout, or the source mount for an Arc mount.
 	RepoRoot string `json:"repo_root"`
 	// Branch is the branch the worktree has checked out. A detached HEAD
 	// reads as "detached@<short hash>".
@@ -99,11 +103,14 @@ func readHead(gitdir string) string {
 	return ""
 }
 
-// Root finds the main checkout of the repository dir belongs to, through git.
+// Root finds the Git main checkout or Arc mount dir belongs to.
 // dir may be the main checkout, a linked worktree, or any directory under
 // either. It is the one detection that runs git, because the caller is about
 // to run git anyway to add a worktree.
 func Root(dir string) (string, error) {
+	if root, ok := arc.Locate(dir); ok {
+		return root, nil
+	}
 	out, err := run(dir, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", fmt.Errorf("%s is not inside a git repository: %w", dir, err)

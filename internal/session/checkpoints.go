@@ -162,7 +162,7 @@ func (d *Daemon) takeTurnCheckpoint(s *Session, window string, job checkpointDue
 		return
 	}
 	repo, verr := d.paneRepo(s, target)
-	if verr != nil {
+	if verr != nil || repo.vcs == "arc" {
 		return
 	}
 	label := d.checkpointLabel(s, window, job.text)

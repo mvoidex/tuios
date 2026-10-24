@@ -123,6 +123,9 @@ func (d *Daemon) checkpointTarget(sessionName, window string) (*Session, WindowS
 	if verr != nil {
 		return nil, WindowState{}, reviewRepo{}, verr
 	}
+	if repo.vcs == "arc" {
+		return nil, WindowState{}, reviewRepo{}, invalidParam("session", "turn checkpoints currently require Git; Arc review notes remain available")
+	}
 	return sess, target, repo, nil
 }
 

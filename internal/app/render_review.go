@@ -423,7 +423,7 @@ func reviewStatusWord(status string) string {
 	case review.StatusRenamed:
 		return "renamed"
 	case review.StatusUntracked:
-		return "new, not added to git"
+		return "new, not staged"
 	}
 	return "modified"
 }

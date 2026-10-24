@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -16,7 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Gaurav-Gosain/tuios/internal/arc"
 	"github.com/Gaurav-Gosain/tuios/internal/plural"
+	"github.com/Gaurav-Gosain/tuios/internal/review"
 	"github.com/Gaurav-Gosain/tuios/internal/sessiontree"
 	"github.com/Gaurav-Gosain/tuios/internal/worktree"
 )
@@ -116,13 +119,13 @@ func (d *Daemon) worktreeSessionNames() []string {
 func repoRootParam(dir string) (string, *verbError) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return "", invalidParam("repo", "repo is required: a directory inside the git repository")
+		return "", invalidParam("repo", "repo is required: a directory inside the Git or Arc repository")
 	}
 	root, err := worktree.Root(dir)
 	if err != nil {
 		return "", hintedVerbError(ErrVerbGitFailed, err.Error(), &VerbHint{
 			Param:  "repo",
-			Detail: "repo must be a directory inside a git repository, in its main checkout or in one of its worktrees.",
+			Detail: "repo must be a directory inside a Git checkout or Arc mount.",
 		})
 	}
 	return root, nil
@@ -135,7 +138,21 @@ func repoRootParam(dir string) (string, *verbError) {
 // caller asked for and can still use. The session gets the caller's terminal
 // from its hello, as one made by new-session does.
 func (d *Daemon) createWorktreeSession(cs *connState, root, branch, base, sessionName string, command, env []string, grants *Grants, record func(*WorktreeInfo)) (map[string]any, *verbError) {
-	path := worktree.PathFor(worktree.DefaultDir(), root, branch)
+	repoName := filepath.Base(root)
+	var arcInfo *arc.Info
+	if _, ok := arc.Locate(root); ok {
+		ctx, cancel := context.WithTimeout(d.ctx, reviewTimeout)
+		defer cancel()
+		info, err := arc.ReadInfo(ctx, root)
+		if err != nil {
+			return nil, reviewGitFailed(err)
+		}
+		repoName, arcInfo = info.Repository, &info
+		if worktree.Slug(repoName) != repoName {
+			return nil, invalidParam("repo", "Arc returned a repository name that is not a directory component")
+		}
+	}
+	path := worktree.PathFor(worktree.DefaultDir(), repoName, branch)
 	if _, err := os.Lstat(path); err == nil {
 		return nil, hintedVerbError(ErrVerbGitFailed, path+" already exists", &VerbHint{
 			Param:  "branch",
@@ -143,7 +160,7 @@ func (d *Daemon) createWorktreeSession(cs *connState, root, branch, base, sessio
 		})
 	}
 	if sessionName == "" {
-		sessionName = worktree.SessionName(filepath.Base(root), branch)
+		sessionName = worktree.SessionName(repoName, branch)
 	}
 	if err := ValidateSessionName(sessionName); err != nil {
 		return nil, invalidParam("name", err.Error())
@@ -157,11 +174,23 @@ func (d *Daemon) createWorktreeSession(cs *connState, root, branch, base, sessio
 		})
 	}
 
-	created, err := worktree.Add(root, path, branch, base)
+	var created bool
+	var err error
+	if arcInfo != nil {
+		ctx, cancel := context.WithTimeout(d.ctx, 2*time.Minute)
+		defer cancel()
+		base, created, err = createArcMount(ctx, root, path, branch, base, *arcInfo)
+	} else {
+		created, err = worktree.Add(root, path, branch, base)
+	}
 	if err != nil {
+		detail := "git refused to add the worktree. The repository is as it was."
+		if arcInfo != nil {
+			detail = "Arc could not finish creating the mount. Any mount already created is kept at " + path + "."
+		}
 		return nil, hintedVerbError(ErrVerbGitFailed, err.Error(), &VerbHint{
 			Param:  "branch",
-			Detail: "git refused to add the worktree. The repository is as it was.",
+			Detail: detail,
 		})
 	}
 
@@ -173,7 +202,7 @@ func (d *Daemon) createWorktreeSession(cs *connState, root, branch, base, sessio
 	}
 	info := &WorktreeInfo{
 		Info: worktree.Info{
-			Repo:     filepath.Base(root),
+			Repo:     repoName,
 			RepoRoot: root,
 			Branch:   branch,
 			Path:     path,
@@ -181,10 +210,15 @@ func (d *Daemon) createWorktreeSession(cs *connState, root, branch, base, sessio
 		Base:    base,
 		Managed: true,
 	}
+	if arcInfo != nil {
+		info.VCS = "arc"
+	}
 	// Where the branch starts, so list-worktrees can tell a branch with
 	// commits of its own from a fresh one. A failure leaves it empty, and the
 	// listing falls back to the merge base.
-	if start, err := worktree.HeadCommit(path); err == nil {
+	if arcInfo != nil {
+		info.StartCommit = base
+	} else if start, err := worktree.HeadCommit(path); err == nil {
 		info.StartCommit = start
 	}
 	if record != nil {
@@ -233,8 +267,14 @@ func (d *Daemon) verbNewWorktree(cs *connState, params json.RawMessage) (any, *v
 		return nil, verr
 	}
 	branch := strings.TrimSpace(p.Branch)
-	if err := worktree.ValidBranch(branch); err != nil {
-		return nil, invalidParam("branch", err.Error())
+	var branchErr error
+	if _, ok := arc.Locate(strings.TrimSpace(p.Repo)); ok {
+		branchErr = review.ValidRef(branch)
+	} else {
+		branchErr = worktree.ValidBranch(branch)
+	}
+	if branchErr != nil {
+		return nil, invalidParam("branch", branchErr.Error())
 	}
 	if len(p.Command) > 0 && p.Command[0] == "" {
 		return nil, invalidParam("command", "command[0] is the program to exec and cannot be empty")
@@ -319,13 +359,27 @@ func (d *Daemon) verbListWorktrees(_ *connState, params json.RawMessage) (any, *
 			"prompt_ready_by": wt.PromptReadyBy,
 			"agent":           wt.Agent,
 		}
+		if wt.VCS != "" {
+			row["vcs"] = wt.VCS
+		}
 		if wt.LaunchedFrom != "" {
 			row["launched_from"] = wt.LaunchedFrom
 		}
 		if wt.PR != nil {
 			row["pr"] = wt.PR
 		}
-		if p.Changes && !wt.Gone {
+		if p.Changes && !wt.Gone && wt.VCS == "arc" {
+			ctx, cancel := context.WithTimeout(d.ctx, reviewTimeout)
+			status, err := arc.Status(ctx, wt.Path)
+			cancel()
+			row["changes"] = -1
+			if err == nil {
+				row["changes"] = arc.Changed(status)
+			}
+			// Unmount retains the store and ignored files, so neither files
+			// nor commits are destroyed by removing an Arc mount.
+			row["ignored"], row["own_commits"] = 0, 0
+		} else if p.Changes && !wt.Gone {
 			// A git status per worktree, only when asked for: the rail never
 			// asks, and a listing an agent polls should not run git it did not
 			// want.
@@ -389,6 +443,9 @@ func (d *Daemon) verbRemoveWorktree(_ *connState, params json.RawMessage) (any, 
 	sess, info, verr := d.worktreeTarget(p.Session)
 	if verr != nil {
 		return nil, verr
+	}
+	if info.VCS == "arc" {
+		return d.removeArcMount(sess, info, p.Force, p.Stash, p.KeepSession)
 	}
 	// Resolved now, while the directory is there to resolve.
 	notesRoot := canonRoot(info.Path)
@@ -676,6 +733,9 @@ func (d *Daemon) verbFan(cs *connState, params json.RawMessage) (any, *verbError
 	root, cloned, verr := d.resolveRepoSource(cs, "fan", p.repoSource, resolveAgents)
 	if verr != nil {
 		return nil, verr
+	}
+	if _, ok := arc.Locate(root); ok {
+		return nil, invalidParam("repo", "fan currently requires Git; create individual Arc mounts with tuios worktree new")
 	}
 	if launches == nil {
 		if verr := resolveAgents(); verr != nil {
