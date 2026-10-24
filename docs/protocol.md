@@ -3977,6 +3977,16 @@ named `<repo>-<branch>` with every slash in the branch turned into a hyphen. A
 branch that does not exist is created from `base`, or from HEAD. A template
 that does not render is refused with `internal`, and nothing is created.
 
+When `repo` is inside an Arc mount, this creates an independent Arc mount
+using the repository name from `arc info`. The source's object store is shared
+so local commits can be used as a base. The persisted worktree record has
+`vcs: "arc"`, `repo` is Arc's repository name, `repo_root` is the source mount,
+and `base` is the resolved starting commit. A session whose first pane is in a
+manually created Arc mount is also registered, with `managed: false` and an
+empty `base`. It follows directory and branch changes and enables creating
+child mounts, but does not grant permission to unmount the discovered mount.
+`repo_url` and cloning remain Git-only.
+
 Params: `repo` (a directory inside the repository, required unless
 `repo_url` is passed), `branch` (required), `base`, `name`, `command` (argv
 for the first window instead of a shell), `repo_url`, `repos_root`, `clone`.
@@ -4032,6 +4042,11 @@ the same way, by reading the directory. `list-sessions` carries the record as
 List the sessions whose directory is a git worktree. A session in the
 repository's main checkout reads as a row with `main` true. No worktree verb
 acts on such a row.
+
+TUIOS-managed Arc mounts are included with `vcs: "arc"`. With `changes`, Arc
+reports the count of changed and untracked paths. `ignored` and `own_commits`
+are zero because unmounting retains Arc's store. Ahead and merged-branch
+detection remain Git-only.
 
 Params: `repo` (filter by repository name), `group` (filter by fan-out stem),
 `changes` (run git in each and report `changes`, `ahead`, `merged` and
@@ -4353,6 +4368,21 @@ name the other attempt.
 Every call finds the pane's notes again in the diff it read and returns them
 as `notes`, as `review-note` lists them. The answer is marked `untrusted`: the
 text is the repository's.
+
+Arc mounts return the same files, hunks and notes, with `vcs: "arc"` and an
+empty `tree_sha`: Arc diffs the current working files without creating a Git
+snapshot. A managed mount defaults to its recorded starting commit; another
+mount defaults to the merge base with Arc's configured default branch. Explicit
+`base` and `uncommitted` work as above. Arc reports renames as additions and
+deletions. `index`, `against`, `review-stage`, shipping, checkpoints, fan-outs
+and worktree transfer currently require Git. Removing a managed Arc mount
+retains the Arc store and reports `store_kept: true`, its `store` path, and
+`branch_kept: true`; pane processes stop before unmounting even with
+`keep_session`. No recursive directory removal is performed.
+The unmount uses `arc unmount --force` after stopping panes so an MCP child
+holding the working directory does not prevent explicit removal. Killing a
+session alone never unmounts it. Detected, unmanaged Arc mounts cannot be
+removed with `remove-worktree` and have no delete-worktree row in the TUI.
 
 `index` reads the worktree's own index instead of a base. `unstaged` is the
 index (written with `git write-tree`) against the working files, untracked

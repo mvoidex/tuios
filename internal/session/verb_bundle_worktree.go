@@ -186,6 +186,9 @@ func (d *Daemon) verbBundleWorktree(cs *connState, params json.RawMessage) (any,
 	if verr != nil {
 		return nil, verr
 	}
+	if info.VCS == "arc" {
+		return nil, invalidParam("session", "worktree transfer currently requires Git; Arc mounts cannot be bundled")
+	}
 	if _, err := os.Stat(info.Path); err != nil {
 		return nil, hintedVerbError(ErrVerbNotWorktree, "the worktree of "+sess.Name()+" is gone: "+info.Path+" no longer exists", nil)
 	}

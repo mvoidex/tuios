@@ -1,4 +1,4 @@
-// Package review reads what an agent changed in a git worktree and carries
+// Package review reads what an agent changed in a Git checkout or Arc mount and carries
 // the notes a person leaves on it back to the agent.
 //
 // It has four parts:
@@ -15,6 +15,8 @@
 //
 // The package runs git and reads files. It keeps no state: the notes
 // themselves are held by the daemon (internal/session).
+// Arc reads its working diff directly and adds untracked files without staging
+// them; Git uses the temporary-index snapshots described above.
 package review
 
 // Line ops, as a diff line reports them.
@@ -122,6 +124,8 @@ type Totals struct {
 
 // Diff is what Build reads.
 type Diff struct {
+	// VCS is arc for an Arc diff, omitted for Git for wire compatibility.
+	VCS string `json:"vcs,omitempty"`
 	// Base is the base as it was named, empty for a diff against another
 	// worktree.
 	Base string `json:"base"`
