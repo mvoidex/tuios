@@ -206,13 +206,25 @@ func (m *OS) DetachClient() tea.Cmd {
 	return tea.Quit
 }
 
-// KillSessionGoNext switches this client to next and only then kills the
+// KillSessionGoNext offers the close confirmation for a worktree session,
+// preserving the requested destination for either close or worktree removal.
+// Plain sessions switch and close immediately.
+func (m *OS) KillSessionGoNext(next string) tea.Cmd {
+	if m.sessionWorktreeInfo(m.SessionName) != nil {
+		cmd := m.OpenSessionClose()
+		m.SessionCloseNext = next
+		return cmd
+	}
+	return m.killSessionGoNext(next)
+}
+
+// killSessionGoNext switches this client to next and only then kills the
 // session it left. The order matters: killing first would make the daemon
 // announce the session ending back to this still-attached client, and that
 // announcement races the switch (SessionEndedMsg quits the program). With no
 // next session, or a switch that fails, it falls back to killing the current
 // session outright, which quits.
-func (m *OS) KillSessionGoNext(next string) tea.Cmd {
+func (m *OS) killSessionGoNext(next string) tea.Cmd {
 	old := m.SessionName
 	// Read while it is still this client's own session: afterwards the label
 	// belongs to the session switched to.

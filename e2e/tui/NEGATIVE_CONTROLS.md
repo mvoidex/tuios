@@ -7,6 +7,29 @@ below. Two of them are **not** caught here; that is written down rather than
 papered over, because a suite whose real coverage is unknown is worse than no
 suite.
 
+## Kill-and-go-next offers worktree removal
+
+`TestWorktreeKillNextConfirmsAndDeletes` drives both the sidebar and quit menu
+on a real attached Git worktree session. It cancels once, then either closes
+only the session or deletes the worktree too. The assertions cover the surviving
+client's destination, the original session's removal, retained branches, and
+recovery of untracked changes from Git stash. `TestArcWorktreeKillNext` drives
+both menus with real Arc/FUSE mounts and remounts each path to verify the local
+branch and stash survived removal.
+
+On 2026-10-26, the Arc-enabled binary from before this fix failed the Git
+sidebar case: the worktree session disappeared and the client switched to
+`plain` without ever showing the confirmation. The real Arc sidebar case failed
+in the same way. The fixed build passed all four
+Git close/delete cases and both real Arc menu cases. Frames named
+`kill-next-confirmation` and `kill-next-complete`, plain and styled, are saved
+under `TUIOS_E2E_FRAMES` in a directory for each case.
+
+Repeat from `e2e/tui` with `TUIOS_E2E=1 TUIOS_E2E_BIN=/path/to/tuios
+TUIOS_E2E_ARC_SOURCE=/path/to/mount TUIOS_E2E_FRAMES=/path/to/artifacts
+go test -count=1 -run '^(TestWorktreeKillNextConfirmsAndDeletes|TestArcWorktreeKillNext)$'
+-timeout 4m -v .`. Arc cases skip without the opt-in source.
+
 ## Arc review notes and managed mounts
 
 `TestArcReviewAndManagedMount` uses the real Arc CLI, service, FUSE mounts,

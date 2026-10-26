@@ -207,6 +207,7 @@ func (m *OS) OpenSessionCloseForWindow(i int) {
 		return
 	}
 	m.SessionCloseTarget = ""
+	m.SessionCloseNext = ""
 	m.SessionCloseWorkspace = 0
 	m.SessionCloseWindow = m.Windows[i].ID
 	m.SessionCloseSelected = SessionCloseRowCancel
@@ -227,6 +228,7 @@ func (m *OS) OpenSessionCloseFor(sessionID string) tea.Cmd {
 	}
 	m.SessionCloseWindow = ""
 	m.SessionCloseTarget = sessionID
+	m.SessionCloseNext = ""
 	m.SessionCloseSelected = SessionCloseRowCancel
 	m.SessionCloseWorktreeToll = nil
 	m.ShowSessionClose = true
@@ -242,6 +244,7 @@ func (m *OS) OpenSessionCloseFor(sessionID string) tea.Cmd {
 func (m *OS) CloseSessionClose() {
 	m.ShowSessionClose = false
 	m.SessionCloseTarget = ""
+	m.SessionCloseNext = ""
 	m.SessionCloseWorkspace = 0
 	m.SessionCloseWindow = ""
 	m.SessionCloseSelected = SessionCloseRowCancel
@@ -261,12 +264,14 @@ func (m *OS) SessionCloseMove(delta int) {
 // the attached session goes through QuitSession, which is the one
 // implementation of ending the session this client is in: it kills the
 // daemon-side session where there is one and cleans up where there is not.
+// A kill-and-go-next confirmation switches before killing instead.
 //
 // Any other session is killed where it stands. Nothing about this client
 // changes: it stays attached to what it was attached to, and the rail loses a
 // row when the daemon's next listing says so.
 func (m *OS) SessionCloseActivate(idx int) tea.Cmd {
 	target := m.SessionCloseTarget
+	next := m.SessionCloseNext
 	ws := m.SessionCloseWorkspace
 	win := m.SessionCloseWindow
 	// The dialog refuses the delete it knows would lose commits: a detached
@@ -292,7 +297,7 @@ func (m *OS) SessionCloseActivate(idx int) tea.Cmd {
 		if name == "" {
 			name = m.SessionName
 		}
-		return m.deleteWorktreeCmd(name, name == m.sidebarCurrentSessionID())
+		return m.deleteWorktreeCmd(name, name == m.sidebarCurrentSessionID(), next)
 	default:
 		return nil
 	}
@@ -311,6 +316,9 @@ func (m *OS) SessionCloseActivate(idx int) tea.Cmd {
 	if target != "" {
 		m.KillOtherSession(target)
 		return nil
+	}
+	if next != "" {
+		return m.killSessionGoNext(next)
 	}
 	m.QuitSession()
 	return tea.Quit
@@ -356,7 +364,7 @@ func (m *OS) sessionKillChan() chan SessionKilledMsg {
 // story, and it would drop the note that says where the stashed changes
 // went. The session is killed from here instead, after the note is shown:
 // QuitSession and KillOtherSession both record the intent first.
-func (m *OS) deleteWorktreeCmd(name string, attached bool) tea.Cmd {
+func (m *OS) deleteWorktreeCmd(name string, attached bool, next string) tea.Cmd {
 	dial := m.verbDialer()
 	params := map[string]any{"session": name, "stash": true, "keep_session": true}
 	return func() tea.Msg {
@@ -374,7 +382,7 @@ func (m *OS) deleteWorktreeCmd(name string, attached bool) tea.Cmd {
 			return worktreeRemovedMsg{Name: name, Attached: attached, Err: err}
 		}
 		return worktreeRemovedMsg{
-			Name: name, Attached: attached,
+			Name: name, Attached: attached, NextSession: next,
 			Gone: res.Gone, Path: res.Path, Branch: res.Branch, Note: res.Note,
 			Changes: res.Changes, Ignored: res.Ignored, Stashed: res.Stashed,
 			SessionKilled: res.SessionKilled,
@@ -488,14 +496,16 @@ func (m *OS) worktreeTollLine() string {
 }
 
 // worktreeRemovedMsg is a finished removal on its way back to the loop.
-// Attached is captured at activation time, before the dialog closes, because
-// the handler has to quit this client when the deleted session is the one it
-// was attached to.
+// Attached and NextSession are captured before the dialog closes, so the
+// handler can switch or quit after removing the attached session's worktree.
 type worktreeRemovedMsg struct {
 	// Name is the session whose worktree was removed.
 	Name string
 	// Attached says whether that session was the one this client is in.
 	Attached bool
+	// NextSession is the requested destination after removing an attached
+	// worktree. Empty keeps the usual delete-and-quit behavior.
+	NextSession string
 	// Gone says the directory had already been deleted out from under the
 	// daemon, which it reports rather than failing.
 	Gone bool
@@ -553,6 +563,18 @@ func (m *OS) handleWorktreeRemoved(msg worktreeRemovedMsg) tea.Cmd {
 		// of the note.
 		note += " " + countOf(msg.Ignored, "ignored file") + " deleted."
 	}
+	if msg.Attached && msg.NextSession != "" {
+		// The user may have switched while the removal ran. Only perform the
+		// requested switch if this client is still on the removed worktree.
+		if msg.Name == m.sidebarCurrentSessionID() {
+			if err := m.SwitchToSession(msg.NextSession); err != nil {
+				m.ShowNotification(note+" Could not switch sessions: "+err.Error(), "error", m.Settings.NotificationDuration*2)
+				return nil
+			}
+		}
+		msg.Attached = false
+	}
+	// Switching posts its own notification. The recovery note must follow it.
 	m.ShowNotification(note, "info", m.Settings.NotificationDuration)
 	if msg.SessionKilled {
 		// The daemon killed the session for the removal (Windows), so there

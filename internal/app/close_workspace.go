@@ -69,6 +69,9 @@ func (m *OS) sessionCloseLabel() string {
 	if m.SessionCloseWorkspace != 0 {
 		return "Close workspace"
 	}
+	if m.SessionCloseNext != "" {
+		return "Close session and go to next"
+	}
 	return "Close session"
 }
 

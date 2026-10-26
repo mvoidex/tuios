@@ -372,10 +372,8 @@ func (m *OS) desktopMenu() (string, []ContextMenuItem) {
 // nothing to detach from a session this client is not in. The accent belongs to
 // the row's own session and is offered on every one of them.
 //
-// Kill-and-quit on a worktree session takes a directory with it, so it goes
-// through the close confirmation — the one dialog that offers to delete the
-// worktree too — instead of killing outright. A plain session's row keeps its
-// instant quit: there is nothing on disk to ask about.
+// Both kill actions on a worktree session go through the close confirmation,
+// which offers to delete the worktree too. Plain sessions close immediately.
 func (m *OS) sessionMenu(sessionID string) (string, []ContextMenuItem) {
 	if sessionID == "" {
 		sessionID = m.SessionName

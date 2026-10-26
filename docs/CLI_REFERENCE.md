@@ -821,6 +821,12 @@ The result reports its location. Remount the same path with `arc mount -r
 record until its client closes it, but the panes still stop before unmounting.
 Killing a session alone leaves its mount mounted. Unmounting is a separate,
 explicit action: `worktree rm` or "Delete worktree too" in the close dialog.
+For an attached worktree session, "Kill session, go to next" in the sidebar or
+quit menu opens that dialog. "Close session and go to next" keeps the worktree;
+"Delete worktree too" stashes changes and removes it before switching to the
+next session. Cancelling keeps both the session and worktree. The sidebar's
+"Kill session and quit" opens the same dialog and quits after closing instead
+of switching. These close choices apply to Git worktrees too.
 Manually created mounts remain unmanaged: neither action unmounts them, and
 their close dialog only offers closing the session. Unmount them with Arc.
 `worktree diff` shows the Arc review diff against the mount's starting commit.

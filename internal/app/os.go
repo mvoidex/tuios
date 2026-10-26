@@ -433,6 +433,9 @@ type OS struct {
 	// this client where it is.
 	ShowSessionClose   bool
 	SessionCloseTarget string
+	// SessionCloseNext is the destination requested by kill-and-go-next.
+	// Empty means closing the attached session quits this client.
+	SessionCloseNext string
 	// SessionCloseWorkspace turns the dialog into close_workspace's: it asks
 	// about the panes of this workspace, not the session. 0 is the session.
 	SessionCloseWorkspace int
