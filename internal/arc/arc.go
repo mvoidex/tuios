@@ -18,16 +18,14 @@ import (
 )
 
 // Locate finds the nearest Arc checkout without starting a process. A nested
-// Git repository ends the search. HEAD distinguishes a checkout's .arc directory
-// from the user's ~/.arc directory containing the launcher and mount registry.
+// Git repository ends the search. At a mount root, .arc takes precedence over .git.
+// HEAD distinguishes a checkout's .arc directory from the user's ~/.arc directory
+// containing the launcher and mount registry.
 func Locate(dir string) (string, bool) {
 	if dir == "" {
 		return "", false
 	}
 	for dir = filepath.Clean(dir); ; dir = filepath.Dir(dir) {
-		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-			return "", false
-		}
 		marker := filepath.Join(dir, ".arc")
 		if st, err := os.Lstat(marker); err == nil {
 			if !st.IsDir() {
@@ -36,6 +34,9 @@ func Locate(dir string) (string, bool) {
 			if _, err := os.Stat(filepath.Join(marker, "HEAD")); err == nil {
 				return dir, true
 			}
+		}
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return "", false
 		}
 		if parent := filepath.Dir(dir); parent == dir {
 			return "", false
