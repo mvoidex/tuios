@@ -26,6 +26,8 @@ type unifiedReader struct {
 	skipping  bool
 	total     int
 	truncated bool
+	// countChanges drains an Arc diff for totals after the display limits.
+	countChanges bool
 }
 
 // readUnified reads r into files and reports whether any file was truncated
@@ -33,7 +35,11 @@ type unifiedReader struct {
 // lim.Bytes of text is read, every file left keeps its counts only; a file
 // past lim.LinesPerFile does too.
 func readUnified(r io.Reader, files []File, lim Limits) (truncated, stopped bool, err error) {
-	u := &unifiedReader{files: files, lim: lim, idx: -1}
+	return readUnifiedMode(r, files, lim, false)
+}
+
+func readUnifiedMode(r io.Reader, files []File, lim Limits, countChanges bool) (truncated, stopped bool, err error) {
+	u := &unifiedReader{files: files, lim: lim, idx: -1, countChanges: countChanges}
 	br := bufio.NewReaderSize(r, 64<<10)
 	for {
 		raw, rerr := br.ReadString('\n')
@@ -74,20 +80,34 @@ func (u *unifiedReader) line(raw string) bool {
 			return true
 		}
 		if u.idx >= u.lim.Files || u.total > u.lim.Bytes {
-			u.cutRest(u.idx)
-			return true
+			if !u.countChanges {
+				u.cutRest(u.idx)
+				return true
+			}
+			if !u.files[u.idx].Binary {
+				u.files[u.idx].Truncated = true
+				u.truncated = true
+			}
 		}
 		u.cur = &u.files[u.idx]
 		u.fileLines = 0
-		u.skipping = u.cur.Binary
+		u.skipping = u.cur.Binary || u.cur.Truncated
 		return false
 	}
 	if u.cur == nil {
 		return false
 	}
 	if u.total > u.lim.Bytes {
-		u.cutRest(u.idx)
-		return true
+		if !u.countChanges {
+			u.cutRest(u.idx)
+			return true
+		}
+		if !u.cur.Binary {
+			u.cur.Truncated = true
+			u.cur.Hunks = nil
+			u.truncated = true
+		}
+		u.skipping = true
 	}
 
 	if !u.inHunk {
@@ -146,10 +166,16 @@ func (u *unifiedReader) line(raw string) bool {
 	}
 	switch op {
 	case OpDelete:
+		if u.countChanges {
+			u.cur.Removed++
+		}
 		ln.Old = u.oldLine
 		u.oldLine++
 		u.oldLeft--
 	case OpAdd:
+		if u.countChanges {
+			u.cur.Added++
+		}
 		ln.New = u.newLine
 		u.newLine++
 		u.newLeft--

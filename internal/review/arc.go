@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,14 +58,9 @@ func resolveArcBase(ctx context.Context, dir, requested, recorded string, uncomm
 	return head, nil
 }
 
-var (
-	arcAddedRE   = regexp.MustCompile(`(\d+) insertions?\(\+\)`)
-	arcRemovedRE = regexp.MustCompile(`(\d+) deletions?\(-\)`)
-)
-
 // buildArc reads the current tracked diff directly from Arc. Untracked files
-// are added from status without staging them. Arc's --stat supplies counts
-// separately so files beyond the hunk limits still have accurate counts.
+// are added from status without staging them. One tracked diff supplies both
+// hunks and counts, including counts beyond the display limits.
 func buildArc(ctx context.Context, opt Options) (*Diff, error) {
 	if opt.AgainstDir != "" || opt.Tree != "" {
 		return nil, errors.New("arc review supports a base or uncommitted changes; comparing mounts and Git checkpoints is not supported")
@@ -102,6 +96,17 @@ func buildArc(ctx context.Context, opt Options) (*Diff, error) {
 		d.Files = append(d.Files, f)
 		seen[f.Path] = true
 	}
+	// Keep Arc's listing order while parsing its unified stream; sorting
+	// before this would attach hunks to the wrong files.
+	remaining := lim.Bytes
+	tracked := len(d.Files)
+	if tracked > 0 {
+		used, err := streamArcFiles(ctx, opt, d.Files, lim)
+		if err != nil {
+			return nil, err
+		}
+		remaining -= used
+	}
 	for _, entry := range status["untracked"] {
 		if err := ValidPath(entry.Path); err != nil {
 			return nil, fmt.Errorf("arc status path: %w", err)
@@ -111,8 +116,6 @@ func buildArc(ctx context.Context, opt Options) (*Diff, error) {
 			seen[entry.Path] = true
 		}
 	}
-	sort.Slice(d.Files, func(i, j int) bool { return d.Files[i].Path < d.Files[j].Path })
-	remaining := lim.Bytes
 	for i := range d.Files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -127,32 +130,13 @@ func buildArc(ctx context.Context, opt Options) (*Diff, error) {
 				return nil, err
 			}
 			remaining -= used
-		} else {
-			stats, err := arc.Run(ctx, opt.Dir, "diff", "--stat", "--no-color", opt.Base.SHA, "--", f.Path)
-			if err != nil {
-				return nil, err
-			}
-			if match := arcAddedRE.FindStringSubmatch(stats); len(match) > 1 {
-				f.Added, _ = strconv.Atoi(match[1])
-			}
-			if match := arcRemovedRE.FindStringSubmatch(stats); len(match) > 1 {
-				f.Removed, _ = strconv.Atoi(match[1])
-			}
-			if countsOnly {
-				f.Truncated = true
-			} else {
-				used, err := streamArcFile(ctx, opt, d.Files[i:i+1], fileLim)
-				if err != nil {
-					return nil, err
-				}
-				remaining -= used
-			}
 		}
 		d.Truncated = d.Truncated || f.Truncated
 		d.Totals.Files++
 		d.Totals.Added += f.Added
 		d.Totals.Removed += f.Removed
 	}
+	sort.Slice(d.Files, func(i, j int) bool { return d.Files[i].Path < d.Files[j].Path })
 	return d, nil
 }
 
@@ -167,10 +151,15 @@ func (r *arcDiffReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func streamArcFile(ctx context.Context, opt Options, files []File, lim Limits) (int, error) {
+func streamArcFiles(ctx context.Context, opt Options, files []File, lim Limits) (int, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := arc.Command(ctx, opt.Dir, "diff", "--git", "--no-color", "--unified", strconv.Itoa(max(opt.Context, 0)), opt.Base.SHA, "--", files[0].Path)
+	args := []string{"diff", "--git", "--no-color", "--unified", strconv.Itoa(max(opt.Context, 0)), opt.Base.SHA}
+	if len(opt.Paths) > 0 {
+		args = append(args, "--")
+		args = append(args, opt.Paths...)
+	}
+	cmd := arc.Command(ctx, opt.Dir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -180,9 +169,9 @@ func streamArcFile(ctx context.Context, opt Options, files []File, lim Limits) (
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
-	reader := &arcDiffReader{Reader: io.LimitReader(stdout, int64(lim.Bytes)+1)}
-	_, stopped, rerr := readUnified(reader, files, lim)
-	if stopped || rerr != nil || reader.read > lim.Bytes {
+	reader := &arcDiffReader{Reader: stdout}
+	_, stopped, rerr := readUnifiedMode(reader, files, lim, true)
+	if stopped || rerr != nil {
 		cancel()
 	}
 	werr := cmd.Wait()

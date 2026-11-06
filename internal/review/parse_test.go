@@ -132,6 +132,29 @@ func TestReadUnified(t *testing.T) {
 	}
 }
 
+// A counted stream must keep accurate totals after each display limit,
+// including later files and lines that resemble diff headers.
+func TestReadUnifiedCountedLimits(t *testing.T) {
+	for _, lim := range []Limits{
+		DefaultLimits,
+		{Files: 1, Bytes: 1 << 20, LinesPerFile: 100},
+		{Files: 10, Bytes: 40, LinesPerFile: 100},
+		{Files: 10, Bytes: 1 << 20, LinesPerFile: 1},
+	} {
+		files := []File{{Path: "a.go"}, {Path: "logo.png"}, {Path: "---"}}
+		_, stopped, err := readUnifiedMode(strings.NewReader(unifiedFixture), files, lim, true)
+		if err != nil || stopped {
+			t.Fatalf("limits %+v: stopped %v, err %v", lim, stopped, err)
+		}
+		if files[0].Added != 2 || files[0].Removed != 1 || !files[1].Binary || files[2].Added != 2 {
+			t.Fatalf("limits %+v: wrong counts: %+v", lim, files)
+		}
+		if lim != DefaultLimits && (!files[2].Truncated || len(files[2].Hunks) != 0) {
+			t.Fatalf("limits %+v: retained truncated hunks: %+v", lim, files[2])
+		}
+	}
+}
+
 func TestReadUnifiedLimits(t *testing.T) {
 	big := func(name string, n int) string {
 		var b strings.Builder
